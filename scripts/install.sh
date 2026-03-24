@@ -16,21 +16,21 @@ echo "=== Installing OB-Xd Module ==="
 
 # Deploy to Move - sound_generators subdirectory
 echo "Copying module to Move..."
-ssh ableton@move.local "mkdir -p /data/UserData/move-anything/modules/sound_generators/obxd"
-scp -r dist/obxd/* ableton@move.local:/data/UserData/move-anything/modules/sound_generators/obxd/
+ssh ableton@move.local "mkdir -p /data/UserData/schwung/modules/sound_generators/obxd"
+scp -r dist/obxd/* ableton@move.local:/data/UserData/schwung/modules/sound_generators/obxd/
 
 # Install chain presets if they exist
 if [ -d "src/chain_patches" ]; then
     echo "Installing chain presets..."
-    scp src/chain_patches/*.json ableton@move.local:/data/UserData/move-anything/patches/
+    scp src/chain_patches/*.json ableton@move.local:/data/UserData/schwung/patches/
 fi
 
 # Set permissions so Module Store can update later
 echo "Setting permissions..."
-ssh ableton@move.local "chmod -R a+rw /data/UserData/move-anything/modules/sound_generators/obxd"
+ssh ableton@move.local "chmod -R a+rw /data/UserData/schwung/modules/sound_generators/obxd"
 
 echo ""
 echo "=== Install Complete ==="
-echo "Module installed to: /data/UserData/move-anything/modules/sound_generators/obxd/"
+echo "Module installed to: /data/UserData/schwung/modules/sound_generators/obxd/"
 echo ""
 echo "Restart Move Anything to load the new module."
