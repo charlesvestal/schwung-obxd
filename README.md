@@ -1,4 +1,4 @@
-# OB-Xd for Move Everything
+# OB-Xd for Schwung
 
 Virtual analog synthesizer module based on [OB-Xd](https://github.com/reales/OB-Xd) by Filatov Vadim (reales).
 
@@ -15,14 +15,14 @@ Emulates the classic Oberheim OB-X with polyphonic voices, analog-modeled filter
 
 ## Prerequisites
 
-- [Move Everything](https://github.com/charlesvestal/move-everything) installed on your Ableton Move
+- [Schwung](https://github.com/charlesvestal/schwung) installed on your Ableton Move
 - SSH access enabled: http://move.local/development/ssh
 
 ## Install
 
 ### Via Module Store (Recommended)
 
-1. Launch Move Everything on your Move
+1. Launch Schwung on your Move
 2. Select **Module Store** from the main menu
 3. Navigate to **Sound Generators** → **OB-Xd**
 4. Select **Install**
@@ -30,8 +30,8 @@ Emulates the classic Oberheim OB-X with polyphonic voices, analog-modeled filter
 ### Quick Install (pre-built)
 
 ```bash
-curl -L https://raw.githubusercontent.com/charlesvestal/move-everything-obxd/main/obxd-module.tar.gz | \
-  ssh ableton@move.local 'mkdir -p /data/UserData/move-anything/modules/sound_generators && tar -xz -C /data/UserData/move-anything/modules/sound_generators/'
+curl -L https://raw.githubusercontent.com/charlesvestal/schwung-obxd/main/obxd-module.tar.gz | \
+  ssh ableton@move.local 'mkdir -p /data/UserData/schwung/modules/sound_generators && tar -xz -C /data/UserData/schwung/modules/sound_generators/'
 ```
 
 ### Build from Source
@@ -39,8 +39,8 @@ curl -L https://raw.githubusercontent.com/charlesvestal/move-everything-obxd/mai
 Requires Docker (recommended) or ARM64 cross-compiler.
 
 ```bash
-git clone https://github.com/charlesvestal/move-everything-obxd
-cd move-anything-obxd
+git clone https://github.com/charlesvestal/schwung-obxd
+cd schwung-obxd
 ./scripts/build.sh
 ./scripts/install.sh
 ```
@@ -115,7 +115,7 @@ Based on OB-Xd by Filatov Vadim, which is also GPL licensed.
 
 ## AI Assistance Disclaimer
 
-This module is part of Move Everything and was developed with AI assistance, including Claude, Codex, and other AI assistants.
+This module is part of Schwung and was developed with AI assistance, including Claude, Codex, and other AI assistants.
 
 All architecture, implementation, and release decisions are reviewed by human maintainers.  
 AI-assisted content may still contain errors, so please validate functionality, security, and license compatibility before production use.
