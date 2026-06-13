@@ -1035,12 +1035,15 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (inst->octave_transpose > 3) inst->octave_transpose = 3;
         }
 
-        /* Restore all shadow params */
+        /* Restore all shadow params — values are native ints (see state save) */
         for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
             if (json_get_number(val, g_shadow_params[i].key, &fval) == 0) {
-                if (fval < g_shadow_params[i].min_val) fval = g_shadow_params[i].min_val;
-                if (fval > g_shadow_params[i].max_val) fval = g_shadow_params[i].max_val;
-                v2_apply_param_direct(inst, g_shadow_params[i].index, fval);
+                int scale = param_scale(&g_shadow_params[i]);
+                int lo, hi; param_disp_range(scale, &lo, &hi);
+                int n = (int)lroundf(fval);
+                if (n < lo) n = lo;
+                if (n > hi) n = hi;
+                v2_apply_param_direct(inst, g_shadow_params[i].index, disp_to_engine(scale, n));
             }
         }
         return;
@@ -1270,11 +1273,14 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             "{\"preset\":%d,\"octave_transpose\":%d,\"bank_index\":%d,\"bank_name\":\"%s\"",
             inst->current_preset, inst->octave_transpose, inst->current_bank, bname);
 
-        /* Add all shadow params */
+        /* Add all shadow params as native ints (consistent with get_param/chain_params).
+         * The remote-UI bulk path reads "state" and forwards these values verbatim to
+         * the browser, so they must be in the same native-int units as get_param. */
         for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
-            float val = inst->params[g_shadow_params[i].index];
+            int scale = param_scale(&g_shadow_params[i]);
             offset += snprintf(buf + offset, buf_len - offset,
-                ",\"%s\":%.4f", g_shadow_params[i].key, val);
+                ",\"%s\":%d", g_shadow_params[i].key,
+                engine_to_disp(scale, inst->params[g_shadow_params[i].index]));
         }
 
         offset += snprintf(buf + offset, buf_len - offset, "}");
