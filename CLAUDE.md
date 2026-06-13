@@ -88,7 +88,23 @@ Parameters are organized into categories for Shadow UI hierarchy navigation:
 **Other**
 - `octave_transpose` (plugin-level, -3 to +3 octaves)
 
-Toggle parameters use PARAM_TYPE_INT and display as on/off. Continuous parameters use PARAM_TYPE_FLOAT (0.0-1.0).
+### Parameter value model (native integers — Dexed/JV-880 pattern)
+
+The Shadow UI / chain editor models params as **native integers**, NOT normalized
+floats. It computes `new = current + delta * step`; a param with no `step` (or a
+0..1 float) produces `NaN` → the value shows blank and editing does nothing. So:
+
+- `chain_params` advertises every param as `"type":"int"` with a native `min`/`max`
+  and `"step":1`.
+- `get_param` returns the **raw native integer** as a decimal string.
+- `set_param` accepts that same native integer.
+
+The engine stores everything as 0..1, so we convert only at the get/set/chain
+boundary (`param_scale`/`engine_to_disp`/`disp_to_engine` in `obxd_plugin.cpp`); the
+table itself is unchanged and state/preset stay in engine units. Scales: continuous
+→ `0..100` (percent), toggles → `0..1`, `voice_count` → `1..8`, `octave` → `-2..2`,
+`legato` → `0..3`, `bend_range` → `0..1`. The Remote UI (`web_ui.html`) speaks the
+same native-int contract (knobs send `round(value*100)`; steppers send native ints).
 
 ### Remote UI (`src/web_ui.html`)
 

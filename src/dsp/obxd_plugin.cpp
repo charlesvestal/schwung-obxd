@@ -209,6 +209,68 @@ static const param_def_t g_shadow_params[] = {
 };
 
 /* =====================================================================
+ * Native-integer parameter model (Dexed/JV-880 pattern)
+ *
+ * The Shadow UI / chain editor models params as native integers: chain_params
+ * advertises type "int" with a native min/max, get_param returns the raw native
+ * integer, and set_param accepts that same native integer. (Float params with no
+ * "step" break the editor — it computes value += delta*step => NaN.)
+ *
+ * The OB-Xd engine stores everything as 0..1, so we convert at the get/set/chain
+ * boundary. Engine values stay 0..1 internally (preset/state compat); only the
+ * external contract is native int. The scale for each param is derived from its
+ * PARAM_TYPE and key, so the table above needs no per-row changes.
+ * ===================================================================== */
+enum { SC_PCT, SC_TOGGLE, SC_VOICES, SC_OCTAVE, SC_LEGATO, SC_BEND };
+#define OBXD_MAX_VOICES_DISP 8   /* cap voice count display (engine allows up to 32) */
+
+static int param_scale(const param_def_t *d) {
+    if (d->type == PARAM_TYPE_FLOAT) return SC_PCT;
+    if (strcmp(d->key, "voice_count") == 0) return SC_VOICES;
+    if (strcmp(d->key, "octave") == 0)      return SC_OCTAVE;
+    if (strcmp(d->key, "legato") == 0)      return SC_LEGATO;
+    if (strcmp(d->key, "bend_range") == 0)  return SC_BEND;
+    return SC_TOGGLE;  /* every other PARAM_TYPE_INT is an on/off toggle */
+}
+static void param_disp_range(int scale, int *lo, int *hi) {
+    switch (scale) {
+        case SC_PCT:    *lo = 0;  *hi = 100; break;
+        case SC_TOGGLE: *lo = 0;  *hi = 1;   break;
+        case SC_VOICES: *lo = 1;  *hi = OBXD_MAX_VOICES_DISP; break;
+        case SC_OCTAVE: *lo = -2; *hi = 2;   break;
+        case SC_LEGATO: *lo = 0;  *hi = 3;   break;
+        case SC_BEND:   *lo = 0;  *hi = 1;   break;
+        default:        *lo = 0;  *hi = 1;   break;
+    }
+}
+/* engine 0..1 -> native display int */
+static int engine_to_disp(int scale, float v) {
+    switch (scale) {
+        case SC_PCT:    return (int)lroundf(v * 100.0f);
+        case SC_TOGGLE: return v > 0.5f ? 1 : 0;
+        case SC_VOICES: { int n = (int)lroundf(v * 31.0f) + 1;
+                          if (n < 1) n = 1; if (n > OBXD_MAX_VOICES_DISP) n = OBXD_MAX_VOICES_DISP;
+                          return n; }
+        case SC_OCTAVE: return (int)lroundf(v * 4.0f) - 2;
+        case SC_LEGATO: return (int)lroundf(v * 3.0f);
+        case SC_BEND:   return v > 0.5f ? 1 : 0;
+        default:        return v > 0.5f ? 1 : 0;
+    }
+}
+/* native display int -> engine 0..1 */
+static float disp_to_engine(int scale, int n) {
+    switch (scale) {
+        case SC_PCT:    return n / 100.0f;
+        case SC_TOGGLE: return n ? 1.0f : 0.0f;
+        case SC_VOICES: return (n - 1) / 31.0f;
+        case SC_OCTAVE: return (n + 2) / 4.0f;
+        case SC_LEGATO: return n / 3.0f;
+        case SC_BEND:   return n ? 1.0f : 0.0f;
+        default:        return n ? 1.0f : 0.0f;
+    }
+}
+
+/* =====================================================================
  * Shared utility functions
  * ===================================================================== */
 
@@ -284,8 +346,18 @@ static void v2_init_default_patch(obxd_instance_t *inst) {
     /* Global */
     synth->processVolume(1.0f);
     inst->params[VOLUME] = 1.0f;
-    synth->setVoiceCount(MAX_VOICES / 8.0f);
-    inst->params[VOICE_COUNT] = MAX_VOICES / 8.0f;
+    /* Master tune centered: engine osc.tune = param*2-1, so 0.5 = no detune */
+    synth->processTune(0.5f);
+    inst->params[TUNE] = 0.5f;
+    /* 6 voices: engine maps 0..1 -> 1..32 as round(v*31+1), so 6 voices = 5/31 */
+    {
+        float vc = disp_to_engine(SC_VOICES, 6);
+        synth->setVoiceCount(vc);
+        inst->params[VOICE_COUNT] = vc;
+    }
+    /* Octave centered (0 octave shift): engine 0.5 -> (round(0.5*4)-2)*12 = 0 */
+    synth->processOctave(0.5f);
+    inst->params[OCTAVE] = 0.5f;
 
     /* Oscillators */
     synth->processOsc1Saw(1.0f);
@@ -1003,15 +1075,15 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         }
     }
     else {
-        /* Named parameter access via helper (for shadow UI) */
-        float fval = (float)atof(val);
-        /* Find the param and apply it */
+        /* Named parameter access (shadow UI / remote UI) — value is a native int */
         for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
             if (strcmp(key, g_shadow_params[i].key) == 0) {
-                /* Clamp value */
-                if (fval < g_shadow_params[i].min_val) fval = g_shadow_params[i].min_val;
-                if (fval > g_shadow_params[i].max_val) fval = g_shadow_params[i].max_val;
-                v2_apply_param_direct(inst, g_shadow_params[i].index, fval);
+                int scale = param_scale(&g_shadow_params[i]);
+                int lo, hi; param_disp_range(scale, &lo, &hi);
+                int n = atoi(val);
+                if (n < lo) n = lo;
+                if (n > hi) n = hi;
+                v2_apply_param_direct(inst, g_shadow_params[i].index, disp_to_engine(scale, n));
                 return;
             }
         }
@@ -1082,10 +1154,14 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         }
     }
 
-    /* Named parameter access via helper (for shadow UI) */
-    int result = param_helper_get(g_shadow_params, PARAM_DEF_COUNT(g_shadow_params),
-                                  inst->params, key, buf, buf_len);
-    if (result >= 0) return result;
+    /* Named parameter access — return the native int value (shadow UI / remote UI) */
+    for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
+        if (strcmp(key, g_shadow_params[i].key) == 0) {
+            int scale = param_scale(&g_shadow_params[i]);
+            return snprintf(buf, buf_len, "%d",
+                            engine_to_disp(scale, inst->params[g_shadow_params[i].index]));
+        }
+    }
 
     /* UI hierarchy for shadow parameter editor */
     if (strcmp(key, "ui_hierarchy") == 0) {
@@ -1213,15 +1289,15 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             "[{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":9999},"
             "{\"key\":\"octave_transpose\",\"name\":\"Octave\",\"type\":\"int\",\"min\":-3,\"max\":3}");
 
-        /* Add all shadow params */
+        /* Add all shadow params — native int ranges (type int, step 1) */
         for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params) && offset < buf_len - 100; i++) {
+            int scale = param_scale(&g_shadow_params[i]);
+            int lo, hi; param_disp_range(scale, &lo, &hi);
             offset += snprintf(buf + offset, buf_len - offset,
-                ",{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"min\":%g,\"max\":%g}",
+                ",{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"int\",\"min\":%d,\"max\":%d,\"step\":1}",
                 g_shadow_params[i].key,
                 g_shadow_params[i].name[0] ? g_shadow_params[i].name : g_shadow_params[i].key,
-                g_shadow_params[i].type == PARAM_TYPE_INT ? "int" : "float",
-                g_shadow_params[i].min_val,
-                g_shadow_params[i].max_val);
+                lo, hi);
         }
         offset += snprintf(buf + offset, buf_len - offset, "]");
         return offset;

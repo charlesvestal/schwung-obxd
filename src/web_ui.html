@@ -189,10 +189,10 @@ var PANELS = [
       { type: "knob", key: "tune", cap: "MASTER TUNE", def: 0.5, bipolar: true },
     ]},
     { sep: true, items: [
-      { type: "stepper", key: "voice_count", cap: "VOICES", def: 1.0,
-        steps: [0,0.2,0.4,0.6,0.8,1.0], labels: ["1","2","3","4","5","6"] },
-      { type: "stepper", key: "legato", cap: "LEGATO", def: 0.0,
-        steps: [0,0.34,0.67,1.0], labels: ["RETRIG","LEG-1","LEG-2","KEEP"] },
+      { type: "stepper", key: "voice_count", cap: "VOICES", def: 6,
+        steps: [1,2,3,4,5,6,7,8], labels: ["1","2","3","4","5","6","7","8"] },
+      { type: "stepper", key: "legato", cap: "LEGATO", def: 0,
+        steps: [0,1,2,3], labels: ["RETRIG","LEG-1","LEG-2","KEEP"] },
       { type: "switch", key: "as_played", cap: "AS PLAYED", def: 0 },
     ]},
     { sep: true, items: [
@@ -232,13 +232,13 @@ var PANELS = [
 
   { title: "OSCILLATORS", cols: [
     { hdr: "OSC 1", items: [
-      { type: "knob", key: "osc1_pitch", cap: "FREQ", def: 0.5, bipolar: true },
+      { type: "knob", key: "osc1_pitch", cap: "FREQ", def: 0 },
       { type: "switch", key: "osc1_saw", cap: "SAW", def: 1 },
       { type: "switch", key: "osc1_pulse", cap: "PULSE", def: 0 },
     ]},
     { sep: true, hdr: "OSC 2", items: [
       { type: "cols2", of: [
-        { type: "knob", key: "osc2_pitch", cap: "FREQ", def: 0.5, bipolar: true },
+        { type: "knob", key: "osc2_pitch", cap: "FREQ", def: 0 },
         { type: "switch", key: "osc2_saw", cap: "SAW", def: 1 },
         { type: "switch", key: "osc2_pulse", cap: "PULSE", def: 0 },
         { type: "knob", key: "osc2_detune", cap: "DETUNE", def: 0.1, small: true },
@@ -259,7 +259,7 @@ var PANELS = [
         ],
         [ /* step + pitch envelope */
           { type: "switch", key: "osc_quantize", cap: "STEP", def: 0 },
-          { type: "knob", key: "env_pitch", cap: "PITCH ENV", def: 0.5, small: true, bipolar: true },
+          { type: "knob", key: "env_pitch", cap: "PITCH ENV", def: 0, small: true },
           { type: "switch", key: "env_pitch_both", cap: "PE BOTH", def: 0 },
         ],
       ]},
@@ -278,7 +278,7 @@ var PANELS = [
     { items: [
       { type: "knob", key: "cutoff", cap: "CUTOFF", def: 0.7 },
       { type: "knob", key: "resonance", cap: "RESONANCE", def: 0.2 },
-      { type: "knob", key: "filter_env", cap: "ENVELOPE", def: 0.3, bipolar: true },
+      { type: "knob", key: "filter_env", cap: "ENVELOPE", def: 0.3 },
     ]},
     { sep: true, items: [
       { type: "knob", key: "key_follow", cap: "KEY", def: 0, small: true },
@@ -367,7 +367,8 @@ function makeKnob(item) {
     }
   }
 
-  function commit(v) { render(v); schwungRemote.setParam(P + item.key, cur.toFixed(4)); }
+  /* knobs are 0..1 internally; the DSP contract is a native int 0..100 (percent) */
+  function commit(v) { render(v); schwungRemote.setParam(P + item.key, String(Math.round(cur * 100))); }
 
   /* drag (vertical) */
   var dragging = false, startY = 0, startV = 0;
@@ -403,7 +404,7 @@ function makeKnob(item) {
   k.addEventListener("dblclick", function () { commit(item.def); });
 
   render(item.def);
-  registry[item.key] = { el: k, set: function (v) { render(parseFloat(v)); } };
+  registry[item.key] = { el: k, set: function (v) { render(parseFloat(v) / 100); } };
   return wrap;
 }
 
@@ -456,7 +457,7 @@ function makeStepper(item) {
   function advance(dir) {
     idx = (idx + dir + item.steps.length) % item.steps.length;
     box.textContent = item.labels[idx];
-    schwungRemote.setParam(P + item.key, item.steps[idx].toFixed(4));
+    schwungRemote.setParam(P + item.key, String(item.steps[idx]));  /* native int */
   }
   box.addEventListener("click", function () { advance(1); });
   box.addEventListener("contextmenu", function (e) { e.preventDefault(); advance(-1); });
