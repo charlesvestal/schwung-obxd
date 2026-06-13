@@ -2,7 +2,7 @@
   "id": "obxd",
   "name": "OB-Xd",
   "abbrev": "OB",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Virtual analog synthesizer based on Oberheim OB-X",
   "author": "reales (port: charlesvestal)",
   "license": "GPL-3.0",
@@ -45,7 +45,7 @@
         "global": {
           "name": "Global",
           "knobs": ["volume", "tune", "octave", "portamento", "unison", "unison_det", "legato", "octave_transpose"],
-          "params": ["volume", "tune", "octave", "portamento", "unison", "unison_det", "legato", "as_played", "octave_transpose"]
+          "params": ["volume", "tune", "octave", "voice_count", "portamento", "unison", "unison_det", "legato", "as_played", "octave_transpose"]
         },
         "osc1": {
           "name": "Oscillator 1",

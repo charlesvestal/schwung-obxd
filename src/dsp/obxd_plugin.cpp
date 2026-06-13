@@ -1116,7 +1116,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 "\"global\":{"
                     "\"children\":null,"
                     "\"knobs\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"octave_transpose\"],"
-                    "\"params\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"as_played\",\"octave_transpose\"]"
+                    "\"params\":[\"volume\",\"tune\",\"octave\",\"voice_count\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"as_played\",\"octave_transpose\"]"
                 "},"
                 "\"osc1\":{"
                     "\"children\":null,"
