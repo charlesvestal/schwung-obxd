@@ -156,6 +156,7 @@
     <div class="name" id="preset-name">&mdash;</div>
     <button class="btn" id="next">Next &#9654;</button>
   </div>
+  <button class="btn" id="sync" title="Force a full re-sync from the device">&#8635; Sync</button>
 </div>
 
 <div id="rack"></div>
@@ -608,12 +609,25 @@ function seed() {
   refreshPreset();
 }
 
+/* ---------------- force re-sync ---------------- */
+/* Re-fire the subscribe: the manager re-pushes slot info + hierarchy +
+ * chain_params + the full current state on every subscribe, so this pulls
+ * every control back into sync if updates ever fall behind. */
+function forceSync() {
+  var s = document.getElementById("status");
+  if (s) s.textContent = "Re-syncing…";
+  try { window.parent.postMessage({ type: "subscribe" }, "*"); } catch (e) {}
+  setTimeout(seed, 250);        /* re-read the refreshed cache as a backstop */
+  refreshPreset();
+}
+
 /* ---------------- boot ---------------- */
 renderRack();
 document.getElementById("prev").addEventListener("click", function () { changePreset(-1); });
 document.getElementById("next").addEventListener("click", function () { changePreset(1); });
 document.getElementById("oct-down").addEventListener("click", function () { changeOctave(-1); });
 document.getElementById("oct-up").addEventListener("click", function () { changeOctave(1); });
+document.getElementById("sync").addEventListener("click", forceSync);
 
 schwungRemote.onParamChange(function (params) {
   applyParams(params);
