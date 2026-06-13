@@ -184,6 +184,28 @@ static const param_def_t g_shadow_params[] = {
     /* Pitch Mod - toggle */
     {"env_pitch_both","Env Pitch Both",PARAM_TYPE_INT,   ENV_PITCH_BOTH,0.0f, 1.0f},  /* toggle */
     {"bend_range",    "Bend Range",    PARAM_TYPE_INT,   BENDRANGE,     0.0f, 1.0f},  /* 2 or 12 semitones */
+    {"bend_osc2",     "Bend>Osc2",     PARAM_TYPE_INT,   BENDOSC2,      0.0f, 1.0f},  /* toggle */
+    {"osc_quantize",  "Osc Step",      PARAM_TYPE_INT,   OSCQuantize,   0.0f, 1.0f},  /* toggle (stepped osc2 pitch) */
+
+    /* Voice mode - toggle */
+    {"as_played",     "As Played",     PARAM_TYPE_INT,   ASPLAYEDALLOCATION, 0.0f, 1.0f},  /* toggle: voice alloc */
+    {"economy",       "Economy",       PARAM_TYPE_INT,   ECONOMY_MODE,  0.0f, 1.0f},  /* toggle: CPU economy */
+
+    /* Voice Variation - continuous (per-voice analog drift) */
+    {"porta_var",     "Porta Var",     PARAM_TYPE_FLOAT, PORTADER,      0.0f, 1.0f},
+    {"filter_var",    "Filter Var",    PARAM_TYPE_FLOAT, FILTERDER,     0.0f, 1.0f},
+    {"env_var",       "Env Var",       PARAM_TYPE_FLOAT, ENVDER,        0.0f, 1.0f},
+    {"level_var",     "Level Var",     PARAM_TYPE_FLOAT, LEVEL_DIF,     0.0f, 1.0f},
+
+    /* Per-voice Pan - continuous (0=left, 0.5=center, 1=right) */
+    {"pan_1",         "Pan 1",         PARAM_TYPE_FLOAT, PAN1,          0.0f, 1.0f},
+    {"pan_2",         "Pan 2",         PARAM_TYPE_FLOAT, PAN2,          0.0f, 1.0f},
+    {"pan_3",         "Pan 3",         PARAM_TYPE_FLOAT, PAN3,          0.0f, 1.0f},
+    {"pan_4",         "Pan 4",         PARAM_TYPE_FLOAT, PAN4,          0.0f, 1.0f},
+    {"pan_5",         "Pan 5",         PARAM_TYPE_FLOAT, PAN5,          0.0f, 1.0f},
+    {"pan_6",         "Pan 6",         PARAM_TYPE_FLOAT, PAN6,          0.0f, 1.0f},
+    {"pan_7",         "Pan 7",         PARAM_TYPE_FLOAT, PAN7,          0.0f, 1.0f},
+    {"pan_8",         "Pan 8",         PARAM_TYPE_FLOAT, PAN8,          0.0f, 1.0f},
 };
 
 /* =====================================================================
@@ -311,6 +333,12 @@ static void v2_init_default_patch(obxd_instance_t *inst) {
     synth->processFilterEnvelopeRelease(0.2f);
     inst->params[FREL] = 0.2f;
 
+    /* Per-voice pan: center all voices by default */
+    for (int v = 0; v < 8; v++) {
+        synth->processPan(0.5f, v + 1);
+        inst->params[PAN1 + v] = 0.5f;
+    }
+
     snprintf(inst->preset_name, sizeof(inst->preset_name), "Init");
 }
 
@@ -406,6 +434,17 @@ static void v2_apply_preset(obxd_instance_t *inst, int preset_idx) {
     /* Pitch bend */
     if (p->param_count > BENDRANGE) synth->procPitchWheelAmount(p->params[BENDRANGE]);
     if (p->param_count > BENDLFORATE) synth->procModWheelFrequency(p->params[BENDLFORATE]);
+    if (p->param_count > BENDOSC2) synth->procPitchWheelOsc2Only(p->params[BENDOSC2]);
+
+    /* Voice mode + variation */
+    if (p->param_count > ASPLAYEDALLOCATION) synth->procAsPlayedAlloc(p->params[ASPLAYEDALLOCATION]);
+    if (p->param_count > ECONOMY_MODE) synth->procEconomyMode(p->params[ECONOMY_MODE]);
+    if (p->param_count > LEVEL_DIF) synth->processLoudnessDetune(p->params[LEVEL_DIF]);
+
+    /* Per-voice pan (engine idx is 1-based) */
+    for (int v = 0; v < 8; v++) {
+        if (p->param_count > PAN1 + v) synth->processPan(p->params[PAN1 + v], v + 1);
+    }
 }
 
 /* v2 helper: Apply parameter */
@@ -825,6 +864,28 @@ static void v2_apply_param_direct(obxd_instance_t *inst, int param_idx, float va
         case ENV_PITCH_BOTH:synth->processPitchModBoth(value); break;
         case BENDRANGE:     synth->procPitchWheelAmount(value); break;
         case BENDLFORATE:   synth->procModWheelFrequency(value); break;
+        case BENDOSC2:      synth->procPitchWheelOsc2Only(value); break;
+        case OSCQuantize:   synth->processPitchQuantization(value); break;
+
+        /* Voice mode */
+        case ASPLAYEDALLOCATION: synth->procAsPlayedAlloc(value); break;
+        case ECONOMY_MODE:  synth->procEconomyMode(value); break;
+
+        /* Voice Variation (per-voice analog drift) */
+        case PORTADER:      synth->processPortamentoDetune(value); break;
+        case FILTERDER:     synth->processFilterDetune(value); break;
+        case ENVDER:        synth->processEnvelopeDetune(value); break;
+        case LEVEL_DIF:     synth->processLoudnessDetune(value); break;
+
+        /* Per-voice pan (engine idx is 1-based) */
+        case PAN1:          synth->processPan(value, 1); break;
+        case PAN2:          synth->processPan(value, 2); break;
+        case PAN3:          synth->processPan(value, 3); break;
+        case PAN4:          synth->processPan(value, 4); break;
+        case PAN5:          synth->processPan(value, 5); break;
+        case PAN6:          synth->processPan(value, 6); break;
+        case PAN7:          synth->processPan(value, 7); break;
+        case PAN8:          synth->processPan(value, 8); break;
 
         default: break;
     }
@@ -1045,13 +1106,14 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                         "{\"level\":\"amp_env\",\"label\":\"Amp Env\"},"
                         "{\"level\":\"lfo\",\"label\":\"LFO\"},"
                         "{\"level\":\"lfo_dest\",\"label\":\"LFO Dest\"},"
-                        "{\"level\":\"pitch_mod\",\"label\":\"Pitch Mod\"}"
+                        "{\"level\":\"pitch_mod\",\"label\":\"Pitch Mod\"},"
+                        "{\"level\":\"voice_var\",\"label\":\"Voice Variation\"}"
                     "]"
                 "},"
                 "\"global\":{"
                     "\"children\":null,"
                     "\"knobs\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"octave_transpose\"],"
-                    "\"params\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"octave_transpose\"]"
+                    "\"params\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"as_played\",\"economy\",\"octave_transpose\"]"
                 "},"
                 "\"osc1\":{"
                     "\"children\":null,"
@@ -1060,8 +1122,8 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 "},"
                 "\"osc2\":{"
                     "\"children\":null,"
-                    "\"knobs\":[\"osc2_saw\",\"osc2_pulse\",\"osc2_pitch\",\"osc2_mix\",\"osc2_detune\",\"osc2_sync\"],"
-                    "\"params\":[\"osc2_saw\",\"osc2_pulse\",\"osc2_pitch\",\"osc2_mix\",\"osc2_detune\",\"osc2_sync\"]"
+                    "\"knobs\":[\"osc2_saw\",\"osc2_pulse\",\"osc2_pitch\",\"osc2_mix\",\"osc2_detune\",\"osc2_sync\",\"osc_quantize\"],"
+                    "\"params\":[\"osc2_saw\",\"osc2_pulse\",\"osc2_pitch\",\"osc2_mix\",\"osc2_detune\",\"osc2_sync\",\"osc_quantize\"]"
                 "},"
                 "\"osc_common\":{"
                     "\"children\":null,"
@@ -1095,8 +1157,13 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 "},"
                 "\"pitch_mod\":{"
                     "\"children\":null,"
-                    "\"knobs\":[\"env_pitch\",\"bend_range\",\"vibrato\"],"
-                    "\"params\":[\"env_pitch\",\"env_pitch_both\",\"bend_range\",\"vibrato\"]"
+                    "\"knobs\":[\"env_pitch\",\"bend_range\",\"bend_osc2\",\"vibrato\"],"
+                    "\"params\":[\"env_pitch\",\"env_pitch_both\",\"bend_range\",\"bend_osc2\",\"vibrato\"]"
+                "},"
+                "\"voice_var\":{"
+                    "\"children\":null,"
+                    "\"knobs\":[\"filter_var\",\"porta_var\",\"env_var\",\"level_var\",\"pan_1\",\"pan_2\",\"pan_3\",\"pan_4\"],"
+                    "\"params\":[\"filter_var\",\"porta_var\",\"env_var\",\"level_var\",\"pan_1\",\"pan_2\",\"pan_3\",\"pan_4\",\"pan_5\",\"pan_6\",\"pan_7\",\"pan_8\"]"
                 "},"
                 "\"banks\":{"
                     "\"name\":\"Banks\","

@@ -59,6 +59,7 @@ ${CROSS_PREFIX}g++ -g -O3 -shared -fPIC -std=c++14 \
 echo "Packaging..."
 cat src/module.json > dist/obxd/module.json
 [ -f src/help.json ] && cat src/help.json > dist/obxd/help.json
+[ -f src/web_ui.html ] && cat src/web_ui.html > dist/obxd/web_ui.html
 cat src/ui.js > dist/obxd/ui.js
 cat build/dsp.so > dist/obxd/dsp.so
 chmod +x dist/obxd/dsp.so
