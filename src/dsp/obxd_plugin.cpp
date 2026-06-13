@@ -189,7 +189,7 @@ static const param_def_t g_shadow_params[] = {
 
     /* Voice mode - toggle */
     {"as_played",     "As Played",     PARAM_TYPE_INT,   ASPLAYEDALLOCATION, 0.0f, 1.0f},  /* toggle: voice alloc */
-    {"economy",       "Economy",       PARAM_TYPE_INT,   ECONOMY_MODE,  0.0f, 1.0f},  /* toggle: CPU economy */
+    /* economy mode is forced ON for this fork — not user-controllable (see v2_init_default_patch / v2_apply_preset) */
 
     /* Voice Variation - continuous (per-voice analog drift) */
     {"porta_var",     "Porta Var",     PARAM_TYPE_FLOAT, PORTADER,      0.0f, 1.0f},
@@ -339,6 +339,10 @@ static void v2_init_default_patch(obxd_instance_t *inst) {
         inst->params[PAN1 + v] = 0.5f;
     }
 
+    /* Economy mode is always on in this fork (persistent, not user-controllable) */
+    synth->procEconomyMode(1.0f);
+    inst->params[ECONOMY_MODE] = 1.0f;
+
     snprintf(inst->preset_name, sizeof(inst->preset_name), "Init");
 }
 
@@ -438,7 +442,7 @@ static void v2_apply_preset(obxd_instance_t *inst, int preset_idx) {
 
     /* Voice mode + variation */
     if (p->param_count > ASPLAYEDALLOCATION) synth->procAsPlayedAlloc(p->params[ASPLAYEDALLOCATION]);
-    if (p->param_count > ECONOMY_MODE) synth->procEconomyMode(p->params[ECONOMY_MODE]);
+    synth->procEconomyMode(1.0f);  /* economy mode is always on in this fork — ignore preset value */
     if (p->param_count > LEVEL_DIF) synth->processLoudnessDetune(p->params[LEVEL_DIF]);
 
     /* Per-voice pan (engine idx is 1-based) */
@@ -867,9 +871,8 @@ static void v2_apply_param_direct(obxd_instance_t *inst, int param_idx, float va
         case BENDOSC2:      synth->procPitchWheelOsc2Only(value); break;
         case OSCQuantize:   synth->processPitchQuantization(value); break;
 
-        /* Voice mode */
+        /* Voice mode (economy mode is forced on at init, not controllable here) */
         case ASPLAYEDALLOCATION: synth->procAsPlayedAlloc(value); break;
-        case ECONOMY_MODE:  synth->procEconomyMode(value); break;
 
         /* Voice Variation (per-voice analog drift) */
         case PORTADER:      synth->processPortamentoDetune(value); break;
@@ -1113,7 +1116,7 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 "\"global\":{"
                     "\"children\":null,"
                     "\"knobs\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"octave_transpose\"],"
-                    "\"params\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"as_played\",\"economy\",\"octave_transpose\"]"
+                    "\"params\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"as_played\",\"octave_transpose\"]"
                 "},"
                 "\"osc1\":{"
                     "\"children\":null,"

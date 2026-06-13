@@ -32,11 +32,16 @@ Implements Move Anything plugin_api_v2 (multi-instance):
 - `create_instance`: Initializes synth engine, loads presets
 - `destroy_instance`: Cleanup
 - `on_midi`: Routes to synth engine
-- `set_param`: preset, octave_transpose, and 75 synth parameters
+- `set_param`: preset, octave_transpose, and 74 synth parameters
 - `get_param`: preset_name, preset_count, ui_hierarchy, chain_params, parameter values
 - `render_block`: Renders synth output
 
-### Parameters (75 total)
+### Parameters (74 total)
+
+**Economy mode** is intentionally NOT exposed in this fork: it is forced ON
+permanently (`procEconomyMode(1.0f)` in `v2_init_default_patch` and
+`v2_apply_preset`), removed from `g_shadow_params`, the `ui_hierarchy`, and the
+Remote UI. CPU economy is always enabled.
 
 All parameters from the original OB-Xd engine (`ParamsEnum.h`, identical to upstream
 2DaT/Obxd) are exposed via the `g_shadow_params[]` table in `obxd_plugin.cpp`. Adding a
@@ -48,7 +53,7 @@ automatically from the table.
 Parameters are organized into categories for Shadow UI hierarchy navigation:
 
 **Global**
-- `volume`, `tune`, `octave`, `voice_count`, `legato`, `portamento`, `unison`, `unison_det`, `as_played` (toggle), `economy` (toggle)
+- `volume`, `tune`, `octave`, `voice_count`, `legato`, `portamento`, `unison`, `unison_det`, `as_played` (toggle)
 
 **Oscillator 1**
 - `osc1_saw` (toggle), `osc1_pulse` (toggle), `osc1_pitch`, `osc1_mix`

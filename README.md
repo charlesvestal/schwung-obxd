@@ -60,12 +60,13 @@ This also installs chain presets for using OB-Xd with arpeggiators and effects.
 In Shadow UI / Signal Chain, parameters are organized into navigable categories.
 The same categories drive the on-device menu, the auto-generated chain UI, and the graphical Remote UI.
 
-## Parameters (75 total)
+## Parameters (74 total)
 
-Every parameter from the original OB-Xd engine is now exposed.
+Every parameter from the original OB-Xd engine is exposed, except `economy`
+mode, which this fork forces permanently ON (CPU economy is always enabled).
 
 ### Global
-`volume`, `tune`, `octave`, `voice_count`, `legato`, `portamento`, `unison`, `unison_det`, `as_played`*, `economy`*
+`volume`, `tune`, `octave`, `voice_count`, `legato`, `portamento`, `unison`, `unison_det`, `as_played`*
 
 ### Oscillator 1
 `osc1_saw`*, `osc1_pulse`*, `osc1_pitch`, `osc1_mix`
