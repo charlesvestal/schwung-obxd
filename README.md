@@ -102,9 +102,11 @@ mode, which this fork forces permanently ON (CPU economy is always enabled).
 
 ## Remote UI
 
+![OB-Xd Remote UI](docs/images/obxd-remote-ui.png)
+
 Open **Schwung Manager** at `http://move.local:7700/remote-ui` while OB-Xd is loaded in a slot.
 The module ships a custom `web_ui.html` styled after the classic OB-Xd faceplate
-(Manual · Control · Modulation · Oscillators · Filter · Envelopes · Voice Variation).
+(Global · Control · Modulation · Oscillators · Mixer · Filter · Envelopes · Voice Variation).
 Drag knobs (hold Shift for fine control, double-click to reset), click the LED switches,
 step through presets, and shift the octave — all changes sync bidirectionally with the
 hardware in real time.
