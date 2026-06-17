@@ -1035,15 +1035,31 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (inst->octave_transpose > 3) inst->octave_transpose = 3;
         }
 
-        /* Restore all shadow params — values are native ints (see state save) */
+        /* Restore all shadow params.
+         *
+         * State version sentinel "_sv": v2 (current) stores each param as a native
+         * display int (see state save) which must be mapped back through
+         * disp_to_engine. Legacy blobs (no "_sv") predate the native-int re-model and
+         * stored each param as an engine-normalized 0..1 float; those must be applied
+         * DIRECTLY to the engine (skipping disp_to_engine) or lroundf would collapse
+         * every continuous param toward 0. The "_sv" key is not a real param, so the
+         * apply loop below never touches it (it is not in g_shadow_params). */
+        float sv = 0.0f;
+        bool legacy = (json_get_number(val, "_sv", &sv) != 0);
         for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
             if (json_get_number(val, g_shadow_params[i].key, &fval) == 0) {
-                int scale = param_scale(&g_shadow_params[i]);
-                int lo, hi; param_disp_range(scale, &lo, &hi);
-                int n = (int)lroundf(fval);
-                if (n < lo) n = lo;
-                if (n > hi) n = hi;
-                v2_apply_param_direct(inst, g_shadow_params[i].index, disp_to_engine(scale, n));
+                if (legacy) {
+                    /* fval is already an engine-normalized value (0..1 for continuous
+                     * params; discrete params were stored as their engine float). */
+                    v2_apply_param_direct(inst, g_shadow_params[i].index, fval);
+                } else {
+                    int scale = param_scale(&g_shadow_params[i]);
+                    int lo, hi; param_disp_range(scale, &lo, &hi);
+                    int n = (int)lroundf(fval);
+                    if (n < lo) n = lo;
+                    if (n > hi) n = hi;
+                    v2_apply_param_direct(inst, g_shadow_params[i].index, disp_to_engine(scale, n));
+                }
             }
         }
         return;
@@ -1269,14 +1285,16 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         int offset = 0;
         const char *bname = (inst->current_bank >= 0 && inst->current_bank < inst->bank_count)
             ? inst->banks[inst->current_bank].name : "";
+        /* "_sv" (state version) MUST be emitted first. Restore uses its presence to
+         * distinguish v2 native-int blobs from legacy v1 engine-normalized-float blobs. */
         offset += snprintf(buf + offset, buf_len - offset,
-            "{\"preset\":%d,\"octave_transpose\":%d,\"bank_index\":%d,\"bank_name\":\"%s\"",
+            "{\"_sv\":2,\"preset\":%d,\"octave_transpose\":%d,\"bank_index\":%d,\"bank_name\":\"%s\"",
             inst->current_preset, inst->octave_transpose, inst->current_bank, bname);
 
         /* Add all shadow params as native ints (consistent with get_param/chain_params).
          * The remote-UI bulk path reads "state" and forwards these values verbatim to
          * the browser, so they must be in the same native-int units as get_param. */
-        for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
+        for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params) && offset < buf_len - 64; i++) {
             int scale = param_scale(&g_shadow_params[i]);
             offset += snprintf(buf + offset, buf_len - offset,
                 ",\"%s\":%d", g_shadow_params[i].key,
