@@ -11,7 +11,9 @@ Emulates the classic Oberheim OB-X with polyphonic voices, analog-modeled filter
 - 4-pole resonant filter with envelope modulation
 - LFO with sine, square, and S&H waveforms
 - Full ADSR envelopes for amplitude and filter
+- Per-voice analog variation (filter/glide/envelope drift, level, pan) — the full OB-Xd "Voice Variation" set
 - Works standalone or as a sound generator in Signal Chain patches
+- **Graphical Remote UI** — an OB-Xd-styled web panel in Schwung Manager (`http://move.local:7700/remote-ui`) with knobs, switches, and the preset browser, mirroring the classic faceplate
 
 ## Prerequisites
 
@@ -56,17 +58,21 @@ This also installs chain presets for using OB-Xd with arpeggiators and effects.
 | Knobs 1-8 | Adjust parameters for current category |
 
 In Shadow UI / Signal Chain, parameters are organized into navigable categories.
+The same categories drive the on-device menu, the auto-generated chain UI, and the graphical Remote UI.
 
-## Parameters (67 total)
+## Parameters (74 total)
+
+Every parameter from the original OB-Xd engine is exposed, except `economy`
+mode, which this fork forces permanently ON (CPU economy is always enabled).
 
 ### Global
-`volume`, `tune`, `octave`, `voice_count`, `legato`, `portamento`, `unison`, `unison_det`
+`volume`, `tune`, `octave`, `voice_count`, `legato`, `portamento`, `unison`, `unison_det`, `as_played`*
 
 ### Oscillator 1
 `osc1_saw`*, `osc1_pulse`*, `osc1_pitch`, `osc1_mix`
 
 ### Oscillator 2
-`osc2_saw`*, `osc2_pulse`*, `osc2_pitch`, `osc2_mix`, `osc2_detune`, `osc2_halfstp`*
+`osc2_saw`*, `osc2_pulse`*, `osc2_pitch`, `osc2_mix`, `osc2_detune`, `osc2_sync`*, `osc_quantize`*
 
 ### Osc Common
 `pw`, `pw_env`, `pw_env_both`*, `pw_ofs`, `noise`, `xmod`, `brightness`
@@ -87,9 +93,23 @@ In Shadow UI / Signal Chain, parameters are organized into navigable categories.
 `lfo_osc1`*, `lfo_osc2`*, `lfo_filter`*, `lfo_pw1`*, `lfo_pw2`*
 
 ### Pitch Mod
-`env_pitch`, `env_pitch_both`*, `bend_range`, `bend_osc2`*, `vibrato`
+`env_pitch`, `env_pitch_both`*, `bend_range`*, `bend_osc2`*, `vibrato`
+
+### Voice Variation
+`filter_var`, `porta_var`, `env_var`, `level_var`, `pan_1` … `pan_8`
 
 *\* = toggle (on/off)*
+
+## Remote UI
+
+![OB-Xd Remote UI](docs/images/obxd-remote-ui.png)
+
+Open **Schwung Manager** at `http://move.local:7700/remote-ui` while OB-Xd is loaded in a slot.
+The module ships a custom `web_ui.html` styled after the classic OB-Xd faceplate
+(Global · Control · Modulation · Oscillators · Mixer · Filter · Envelopes · Voice Variation).
+Drag knobs (hold Shift for fine control, double-click to reset), click the LED switches,
+step through presets, and shift the octave — all changes sync bidirectionally with the
+hardware in real time.
 
 ## Troubleshooting
 

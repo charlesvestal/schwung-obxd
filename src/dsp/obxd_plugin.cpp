@@ -184,7 +184,91 @@ static const param_def_t g_shadow_params[] = {
     /* Pitch Mod - toggle */
     {"env_pitch_both","Env Pitch Both",PARAM_TYPE_INT,   ENV_PITCH_BOTH,0.0f, 1.0f},  /* toggle */
     {"bend_range",    "Bend Range",    PARAM_TYPE_INT,   BENDRANGE,     0.0f, 1.0f},  /* 2 or 12 semitones */
+    {"bend_osc2",     "Bend>Osc2",     PARAM_TYPE_INT,   BENDOSC2,      0.0f, 1.0f},  /* toggle */
+    {"osc_quantize",  "Osc Step",      PARAM_TYPE_INT,   OSCQuantize,   0.0f, 1.0f},  /* toggle (stepped osc2 pitch) */
+
+    /* Voice mode - toggle */
+    {"as_played",     "As Played",     PARAM_TYPE_INT,   ASPLAYEDALLOCATION, 0.0f, 1.0f},  /* toggle: voice alloc */
+    /* economy mode is forced ON for this fork — not user-controllable (see v2_init_default_patch / v2_apply_preset) */
+
+    /* Voice Variation - continuous (per-voice analog drift) */
+    {"porta_var",     "Porta Var",     PARAM_TYPE_FLOAT, PORTADER,      0.0f, 1.0f},
+    {"filter_var",    "Filter Var",    PARAM_TYPE_FLOAT, FILTERDER,     0.0f, 1.0f},
+    {"env_var",       "Env Var",       PARAM_TYPE_FLOAT, ENVDER,        0.0f, 1.0f},
+    {"level_var",     "Level Var",     PARAM_TYPE_FLOAT, LEVEL_DIF,     0.0f, 1.0f},
+
+    /* Per-voice Pan - continuous (0=left, 0.5=center, 1=right) */
+    {"pan_1",         "Pan 1",         PARAM_TYPE_FLOAT, PAN1,          0.0f, 1.0f},
+    {"pan_2",         "Pan 2",         PARAM_TYPE_FLOAT, PAN2,          0.0f, 1.0f},
+    {"pan_3",         "Pan 3",         PARAM_TYPE_FLOAT, PAN3,          0.0f, 1.0f},
+    {"pan_4",         "Pan 4",         PARAM_TYPE_FLOAT, PAN4,          0.0f, 1.0f},
+    {"pan_5",         "Pan 5",         PARAM_TYPE_FLOAT, PAN5,          0.0f, 1.0f},
+    {"pan_6",         "Pan 6",         PARAM_TYPE_FLOAT, PAN6,          0.0f, 1.0f},
+    {"pan_7",         "Pan 7",         PARAM_TYPE_FLOAT, PAN7,          0.0f, 1.0f},
+    {"pan_8",         "Pan 8",         PARAM_TYPE_FLOAT, PAN8,          0.0f, 1.0f},
 };
+
+/* =====================================================================
+ * Native-integer parameter model (Dexed/JV-880 pattern)
+ *
+ * The Shadow UI / chain editor models params as native integers: chain_params
+ * advertises type "int" with a native min/max, get_param returns the raw native
+ * integer, and set_param accepts that same native integer. (Float params with no
+ * "step" break the editor — it computes value += delta*step => NaN.)
+ *
+ * The OB-Xd engine stores everything as 0..1, so we convert at the get/set/chain
+ * boundary. Engine values stay 0..1 internally (preset/state compat); only the
+ * external contract is native int. The scale for each param is derived from its
+ * PARAM_TYPE and key, so the table above needs no per-row changes.
+ * ===================================================================== */
+enum { SC_PCT, SC_TOGGLE, SC_VOICES, SC_OCTAVE, SC_LEGATO, SC_BEND };
+#define OBXD_MAX_VOICES_DISP 8   /* cap voice count display (engine allows up to 32) */
+
+static int param_scale(const param_def_t *d) {
+    if (d->type == PARAM_TYPE_FLOAT) return SC_PCT;
+    if (strcmp(d->key, "voice_count") == 0) return SC_VOICES;
+    if (strcmp(d->key, "octave") == 0)      return SC_OCTAVE;
+    if (strcmp(d->key, "legato") == 0)      return SC_LEGATO;
+    if (strcmp(d->key, "bend_range") == 0)  return SC_BEND;
+    return SC_TOGGLE;  /* every other PARAM_TYPE_INT is an on/off toggle */
+}
+static void param_disp_range(int scale, int *lo, int *hi) {
+    switch (scale) {
+        case SC_PCT:    *lo = 0;  *hi = 100; break;
+        case SC_TOGGLE: *lo = 0;  *hi = 1;   break;
+        case SC_VOICES: *lo = 1;  *hi = OBXD_MAX_VOICES_DISP; break;
+        case SC_OCTAVE: *lo = -2; *hi = 2;   break;
+        case SC_LEGATO: *lo = 0;  *hi = 3;   break;
+        case SC_BEND:   *lo = 0;  *hi = 1;   break;
+        default:        *lo = 0;  *hi = 1;   break;
+    }
+}
+/* engine 0..1 -> native display int */
+static int engine_to_disp(int scale, float v) {
+    switch (scale) {
+        case SC_PCT:    return (int)lroundf(v * 100.0f);
+        case SC_TOGGLE: return v > 0.5f ? 1 : 0;
+        case SC_VOICES: { int n = (int)lroundf(v * 31.0f) + 1;
+                          if (n < 1) n = 1; if (n > OBXD_MAX_VOICES_DISP) n = OBXD_MAX_VOICES_DISP;
+                          return n; }
+        case SC_OCTAVE: return (int)lroundf(v * 4.0f) - 2;
+        case SC_LEGATO: return (int)lroundf(v * 3.0f);
+        case SC_BEND:   return v > 0.5f ? 1 : 0;
+        default:        return v > 0.5f ? 1 : 0;
+    }
+}
+/* native display int -> engine 0..1 */
+static float disp_to_engine(int scale, int n) {
+    switch (scale) {
+        case SC_PCT:    return n / 100.0f;
+        case SC_TOGGLE: return n ? 1.0f : 0.0f;
+        case SC_VOICES: return (n - 1) / 31.0f;
+        case SC_OCTAVE: return (n + 2) / 4.0f;
+        case SC_LEGATO: return n / 3.0f;
+        case SC_BEND:   return n ? 1.0f : 0.0f;
+        default:        return n ? 1.0f : 0.0f;
+    }
+}
 
 /* =====================================================================
  * Shared utility functions
@@ -262,8 +346,18 @@ static void v2_init_default_patch(obxd_instance_t *inst) {
     /* Global */
     synth->processVolume(1.0f);
     inst->params[VOLUME] = 1.0f;
-    synth->setVoiceCount(MAX_VOICES / 8.0f);
-    inst->params[VOICE_COUNT] = MAX_VOICES / 8.0f;
+    /* Master tune centered: engine osc.tune = param*2-1, so 0.5 = no detune */
+    synth->processTune(0.5f);
+    inst->params[TUNE] = 0.5f;
+    /* 6 voices: engine maps 0..1 -> 1..32 as round(v*31+1), so 6 voices = 5/31 */
+    {
+        float vc = disp_to_engine(SC_VOICES, 6);
+        synth->setVoiceCount(vc);
+        inst->params[VOICE_COUNT] = vc;
+    }
+    /* Octave centered (0 octave shift): engine 0.5 -> (round(0.5*4)-2)*12 = 0 */
+    synth->processOctave(0.5f);
+    inst->params[OCTAVE] = 0.5f;
 
     /* Oscillators */
     synth->processOsc1Saw(1.0f);
@@ -310,6 +404,16 @@ static void v2_init_default_patch(obxd_instance_t *inst) {
     inst->params[FSUS] = 0.3f;
     synth->processFilterEnvelopeRelease(0.2f);
     inst->params[FREL] = 0.2f;
+
+    /* Per-voice pan: center all voices by default */
+    for (int v = 0; v < 8; v++) {
+        synth->processPan(0.5f, v + 1);
+        inst->params[PAN1 + v] = 0.5f;
+    }
+
+    /* Economy mode is always on in this fork (persistent, not user-controllable) */
+    synth->procEconomyMode(1.0f);
+    inst->params[ECONOMY_MODE] = 1.0f;
 
     snprintf(inst->preset_name, sizeof(inst->preset_name), "Init");
 }
@@ -406,6 +510,17 @@ static void v2_apply_preset(obxd_instance_t *inst, int preset_idx) {
     /* Pitch bend */
     if (p->param_count > BENDRANGE) synth->procPitchWheelAmount(p->params[BENDRANGE]);
     if (p->param_count > BENDLFORATE) synth->procModWheelFrequency(p->params[BENDLFORATE]);
+    if (p->param_count > BENDOSC2) synth->procPitchWheelOsc2Only(p->params[BENDOSC2]);
+
+    /* Voice mode + variation */
+    if (p->param_count > ASPLAYEDALLOCATION) synth->procAsPlayedAlloc(p->params[ASPLAYEDALLOCATION]);
+    synth->procEconomyMode(1.0f);  /* economy mode is always on in this fork — ignore preset value */
+    if (p->param_count > LEVEL_DIF) synth->processLoudnessDetune(p->params[LEVEL_DIF]);
+
+    /* Per-voice pan (engine idx is 1-based) */
+    for (int v = 0; v < 8; v++) {
+        if (p->param_count > PAN1 + v) synth->processPan(p->params[PAN1 + v], v + 1);
+    }
 }
 
 /* v2 helper: Apply parameter */
@@ -825,6 +940,27 @@ static void v2_apply_param_direct(obxd_instance_t *inst, int param_idx, float va
         case ENV_PITCH_BOTH:synth->processPitchModBoth(value); break;
         case BENDRANGE:     synth->procPitchWheelAmount(value); break;
         case BENDLFORATE:   synth->procModWheelFrequency(value); break;
+        case BENDOSC2:      synth->procPitchWheelOsc2Only(value); break;
+        case OSCQuantize:   synth->processPitchQuantization(value); break;
+
+        /* Voice mode (economy mode is forced on at init, not controllable here) */
+        case ASPLAYEDALLOCATION: synth->procAsPlayedAlloc(value); break;
+
+        /* Voice Variation (per-voice analog drift) */
+        case PORTADER:      synth->processPortamentoDetune(value); break;
+        case FILTERDER:     synth->processFilterDetune(value); break;
+        case ENVDER:        synth->processEnvelopeDetune(value); break;
+        case LEVEL_DIF:     synth->processLoudnessDetune(value); break;
+
+        /* Per-voice pan (engine idx is 1-based) */
+        case PAN1:          synth->processPan(value, 1); break;
+        case PAN2:          synth->processPan(value, 2); break;
+        case PAN3:          synth->processPan(value, 3); break;
+        case PAN4:          synth->processPan(value, 4); break;
+        case PAN5:          synth->processPan(value, 5); break;
+        case PAN6:          synth->processPan(value, 6); break;
+        case PAN7:          synth->processPan(value, 7); break;
+        case PAN8:          synth->processPan(value, 8); break;
 
         default: break;
     }
@@ -899,12 +1035,31 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             if (inst->octave_transpose > 3) inst->octave_transpose = 3;
         }
 
-        /* Restore all shadow params */
+        /* Restore all shadow params.
+         *
+         * State version sentinel "_sv": v2 (current) stores each param as a native
+         * display int (see state save) which must be mapped back through
+         * disp_to_engine. Legacy blobs (no "_sv") predate the native-int re-model and
+         * stored each param as an engine-normalized 0..1 float; those must be applied
+         * DIRECTLY to the engine (skipping disp_to_engine) or lroundf would collapse
+         * every continuous param toward 0. The "_sv" key is not a real param, so the
+         * apply loop below never touches it (it is not in g_shadow_params). */
+        float sv = 0.0f;
+        bool legacy = (json_get_number(val, "_sv", &sv) != 0);
         for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
             if (json_get_number(val, g_shadow_params[i].key, &fval) == 0) {
-                if (fval < g_shadow_params[i].min_val) fval = g_shadow_params[i].min_val;
-                if (fval > g_shadow_params[i].max_val) fval = g_shadow_params[i].max_val;
-                v2_apply_param_direct(inst, g_shadow_params[i].index, fval);
+                if (legacy) {
+                    /* fval is already an engine-normalized value (0..1 for continuous
+                     * params; discrete params were stored as their engine float). */
+                    v2_apply_param_direct(inst, g_shadow_params[i].index, fval);
+                } else {
+                    int scale = param_scale(&g_shadow_params[i]);
+                    int lo, hi; param_disp_range(scale, &lo, &hi);
+                    int n = (int)lroundf(fval);
+                    if (n < lo) n = lo;
+                    if (n > hi) n = hi;
+                    v2_apply_param_direct(inst, g_shadow_params[i].index, disp_to_engine(scale, n));
+                }
             }
         }
         return;
@@ -939,15 +1094,15 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         }
     }
     else {
-        /* Named parameter access via helper (for shadow UI) */
-        float fval = (float)atof(val);
-        /* Find the param and apply it */
+        /* Named parameter access (shadow UI / remote UI) — value is a native int */
         for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
             if (strcmp(key, g_shadow_params[i].key) == 0) {
-                /* Clamp value */
-                if (fval < g_shadow_params[i].min_val) fval = g_shadow_params[i].min_val;
-                if (fval > g_shadow_params[i].max_val) fval = g_shadow_params[i].max_val;
-                v2_apply_param_direct(inst, g_shadow_params[i].index, fval);
+                int scale = param_scale(&g_shadow_params[i]);
+                int lo, hi; param_disp_range(scale, &lo, &hi);
+                int n = atoi(val);
+                if (n < lo) n = lo;
+                if (n > hi) n = hi;
+                v2_apply_param_direct(inst, g_shadow_params[i].index, disp_to_engine(scale, n));
                 return;
             }
         }
@@ -1018,10 +1173,14 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         }
     }
 
-    /* Named parameter access via helper (for shadow UI) */
-    int result = param_helper_get(g_shadow_params, PARAM_DEF_COUNT(g_shadow_params),
-                                  inst->params, key, buf, buf_len);
-    if (result >= 0) return result;
+    /* Named parameter access — return the native int value (shadow UI / remote UI) */
+    for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
+        if (strcmp(key, g_shadow_params[i].key) == 0) {
+            int scale = param_scale(&g_shadow_params[i]);
+            return snprintf(buf, buf_len, "%d",
+                            engine_to_disp(scale, inst->params[g_shadow_params[i].index]));
+        }
+    }
 
     /* UI hierarchy for shadow parameter editor */
     if (strcmp(key, "ui_hierarchy") == 0) {
@@ -1045,13 +1204,14 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                         "{\"level\":\"amp_env\",\"label\":\"Amp Env\"},"
                         "{\"level\":\"lfo\",\"label\":\"LFO\"},"
                         "{\"level\":\"lfo_dest\",\"label\":\"LFO Dest\"},"
-                        "{\"level\":\"pitch_mod\",\"label\":\"Pitch Mod\"}"
+                        "{\"level\":\"pitch_mod\",\"label\":\"Pitch Mod\"},"
+                        "{\"level\":\"voice_var\",\"label\":\"Voice Variation\"}"
                     "]"
                 "},"
                 "\"global\":{"
                     "\"children\":null,"
                     "\"knobs\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"octave_transpose\"],"
-                    "\"params\":[\"volume\",\"tune\",\"octave\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"octave_transpose\"]"
+                    "\"params\":[\"volume\",\"tune\",\"octave\",\"voice_count\",\"portamento\",\"unison\",\"unison_det\",\"legato\",\"as_played\",\"octave_transpose\"]"
                 "},"
                 "\"osc1\":{"
                     "\"children\":null,"
@@ -1060,8 +1220,8 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 "},"
                 "\"osc2\":{"
                     "\"children\":null,"
-                    "\"knobs\":[\"osc2_saw\",\"osc2_pulse\",\"osc2_pitch\",\"osc2_mix\",\"osc2_detune\",\"osc2_sync\"],"
-                    "\"params\":[\"osc2_saw\",\"osc2_pulse\",\"osc2_pitch\",\"osc2_mix\",\"osc2_detune\",\"osc2_sync\"]"
+                    "\"knobs\":[\"osc2_saw\",\"osc2_pulse\",\"osc2_pitch\",\"osc2_mix\",\"osc2_detune\",\"osc2_sync\",\"osc_quantize\"],"
+                    "\"params\":[\"osc2_saw\",\"osc2_pulse\",\"osc2_pitch\",\"osc2_mix\",\"osc2_detune\",\"osc2_sync\",\"osc_quantize\"]"
                 "},"
                 "\"osc_common\":{"
                     "\"children\":null,"
@@ -1095,8 +1255,13 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
                 "},"
                 "\"pitch_mod\":{"
                     "\"children\":null,"
-                    "\"knobs\":[\"env_pitch\",\"bend_range\",\"vibrato\"],"
-                    "\"params\":[\"env_pitch\",\"env_pitch_both\",\"bend_range\",\"vibrato\"]"
+                    "\"knobs\":[\"env_pitch\",\"bend_range\",\"bend_osc2\",\"vibrato\"],"
+                    "\"params\":[\"env_pitch\",\"env_pitch_both\",\"bend_range\",\"bend_osc2\",\"vibrato\"]"
+                "},"
+                "\"voice_var\":{"
+                    "\"children\":null,"
+                    "\"knobs\":[\"filter_var\",\"porta_var\",\"env_var\",\"level_var\",\"pan_1\",\"pan_2\",\"pan_3\",\"pan_4\"],"
+                    "\"params\":[\"filter_var\",\"porta_var\",\"env_var\",\"level_var\",\"pan_1\",\"pan_2\",\"pan_3\",\"pan_4\",\"pan_5\",\"pan_6\",\"pan_7\",\"pan_8\"]"
                 "},"
                 "\"banks\":{"
                     "\"name\":\"Banks\","
@@ -1120,15 +1285,20 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         int offset = 0;
         const char *bname = (inst->current_bank >= 0 && inst->current_bank < inst->bank_count)
             ? inst->banks[inst->current_bank].name : "";
+        /* "_sv" (state version) MUST be emitted first. Restore uses its presence to
+         * distinguish v2 native-int blobs from legacy v1 engine-normalized-float blobs. */
         offset += snprintf(buf + offset, buf_len - offset,
-            "{\"preset\":%d,\"octave_transpose\":%d,\"bank_index\":%d,\"bank_name\":\"%s\"",
+            "{\"_sv\":2,\"preset\":%d,\"octave_transpose\":%d,\"bank_index\":%d,\"bank_name\":\"%s\"",
             inst->current_preset, inst->octave_transpose, inst->current_bank, bname);
 
-        /* Add all shadow params */
-        for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
-            float val = inst->params[g_shadow_params[i].index];
+        /* Add all shadow params as native ints (consistent with get_param/chain_params).
+         * The remote-UI bulk path reads "state" and forwards these values verbatim to
+         * the browser, so they must be in the same native-int units as get_param. */
+        for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params) && offset < buf_len - 64; i++) {
+            int scale = param_scale(&g_shadow_params[i]);
             offset += snprintf(buf + offset, buf_len - offset,
-                ",\"%s\":%.4f", g_shadow_params[i].key, val);
+                ",\"%s\":%d", g_shadow_params[i].key,
+                engine_to_disp(scale, inst->params[g_shadow_params[i].index]));
         }
 
         offset += snprintf(buf + offset, buf_len - offset, "}");
@@ -1143,15 +1313,15 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             "[{\"key\":\"preset\",\"name\":\"Preset\",\"type\":\"int\",\"min\":0,\"max\":9999},"
             "{\"key\":\"octave_transpose\",\"name\":\"Octave\",\"type\":\"int\",\"min\":-3,\"max\":3}");
 
-        /* Add all shadow params */
+        /* Add all shadow params — native int ranges (type int, step 1) */
         for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params) && offset < buf_len - 100; i++) {
+            int scale = param_scale(&g_shadow_params[i]);
+            int lo, hi; param_disp_range(scale, &lo, &hi);
             offset += snprintf(buf + offset, buf_len - offset,
-                ",{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"min\":%g,\"max\":%g}",
+                ",{\"key\":\"%s\",\"name\":\"%s\",\"type\":\"int\",\"min\":%d,\"max\":%d,\"step\":1}",
                 g_shadow_params[i].key,
                 g_shadow_params[i].name[0] ? g_shadow_params[i].name : g_shadow_params[i].key,
-                g_shadow_params[i].type == PARAM_TYPE_INT ? "int" : "float",
-                g_shadow_params[i].min_val,
-                g_shadow_params[i].max_val);
+                lo, hi);
         }
         offset += snprintf(buf + offset, buf_len - offset, "]");
         return offset;

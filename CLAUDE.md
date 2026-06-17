@@ -18,10 +18,10 @@ src/
       Filter.h          # 4-pole filter
       Oscillator.h      # BLEP oscillators
       Lfo.h             # LFO
-  presets/              # Factory presets (.h files)
+  presets/              # Factory presets (.fxb banks)
   ui.js                 # JavaScript UI with parameter banks
-  module.json           # Module metadata
-  chain_patches/        # Signal Chain presets
+  web_ui.html           # Graphical Remote UI (schwung-manager iframe)
+  module.json           # Module metadata + ui_hierarchy mirror
 ```
 
 ## Key Implementation Details
@@ -32,22 +32,34 @@ Implements Move Anything plugin_api_v2 (multi-instance):
 - `create_instance`: Initializes synth engine, loads presets
 - `destroy_instance`: Cleanup
 - `on_midi`: Routes to synth engine
-- `set_param`: preset, octave_transpose, and 67 synth parameters
+- `set_param`: preset, octave_transpose, and 74 synth parameters
 - `get_param`: preset_name, preset_count, ui_hierarchy, chain_params, parameter values
 - `render_block`: Renders synth output
 
-### Parameters (67 total)
+### Parameters (74 total)
+
+**Economy mode** is intentionally NOT exposed in this fork: it is forced ON
+permanently (`procEconomyMode(1.0f)` in `v2_init_default_patch` and
+`v2_apply_preset`), removed from `g_shadow_params`, the `ui_hierarchy`, and the
+Remote UI. CPU economy is always enabled.
+
+All parameters from the original OB-Xd engine (`ParamsEnum.h`, identical to upstream
+2DaT/Obxd) are exposed via the `g_shadow_params[]` table in `obxd_plugin.cpp`. Adding a
+parameter means: (1) add a row to `g_shadow_params[]`, (2) add a `case` to
+`v2_apply_param_direct()` (and `v2_apply_preset()` if it should restore from .fxb), and
+(3) place its key in the relevant `ui_hierarchy` level. chain_params JSON is generated
+automatically from the table.
 
 Parameters are organized into categories for Shadow UI hierarchy navigation:
 
 **Global**
-- `volume`, `tune`, `octave`, `voice_count`, `legato`, `portamento`, `unison`, `unison_det`
+- `volume`, `tune`, `octave`, `voice_count`, `legato`, `portamento`, `unison`, `unison_det`, `as_played` (toggle)
 
 **Oscillator 1**
 - `osc1_saw` (toggle), `osc1_pulse` (toggle), `osc1_pitch`, `osc1_mix`
 
 **Oscillator 2**
-- `osc2_saw` (toggle), `osc2_pulse` (toggle), `osc2_pitch`, `osc2_mix`, `osc2_detune`, `osc2_halfstp` (toggle)
+- `osc2_saw` (toggle), `osc2_pulse` (toggle), `osc2_pitch`, `osc2_mix`, `osc2_detune`, `osc2_sync` (toggle), `osc_quantize` (toggle, stepped osc2 pitch)
 
 **Osc Common**
 - `pw`, `pw_env`, `pw_env_both` (toggle), `pw_ofs`, `noise`, `xmod`, `brightness`
@@ -68,12 +80,41 @@ Parameters are organized into categories for Shadow UI hierarchy navigation:
 - `lfo_osc1` (toggle), `lfo_osc2` (toggle), `lfo_filter` (toggle), `lfo_pw1` (toggle), `lfo_pw2` (toggle)
 
 **Pitch Mod**
-- `env_pitch`, `env_pitch_both` (toggle), `bend_range`, `bend_osc2` (toggle), `vibrato`
+- `env_pitch`, `env_pitch_both` (toggle), `bend_range` (toggle), `bend_osc2` (toggle), `vibrato`
+
+**Voice Variation** (per-voice analog drift)
+- `filter_var`, `porta_var`, `env_var`, `level_var`, `pan_1` … `pan_8` (pan: 0=L, 0.5=center, 1=R)
 
 **Other**
-- `octave_transpose` (plugin-level, -2 to +2 octaves)
+- `octave_transpose` (plugin-level, -3 to +3 octaves)
 
-Toggle parameters use PARAM_TYPE_INT and display as on/off. Continuous parameters use PARAM_TYPE_FLOAT (0.0-1.0).
+### Parameter value model (native integers — Dexed/JV-880 pattern)
+
+The Shadow UI / chain editor models params as **native integers**, NOT normalized
+floats. It computes `new = current + delta * step`; a param with no `step` (or a
+0..1 float) produces `NaN` → the value shows blank and editing does nothing. So:
+
+- `chain_params` advertises every param as `"type":"int"` with a native `min`/`max`
+  and `"step":1`.
+- `get_param` returns the **raw native integer** as a decimal string.
+- `set_param` accepts that same native integer.
+
+The engine stores everything as 0..1, so we convert only at the get/set/chain
+boundary (`param_scale`/`engine_to_disp`/`disp_to_engine` in `obxd_plugin.cpp`); the
+table itself is unchanged and state/preset stay in engine units. Scales: continuous
+→ `0..100` (percent), toggles → `0..1`, `voice_count` → `1..8`, `octave` → `-2..2`,
+`legato` → `0..3`, `bend_range` → `0..1`. The Remote UI (`web_ui.html`) speaks the
+same native-int contract (knobs send `round(value*100)`; steppers send native ints).
+
+### Remote UI (`src/web_ui.html`)
+
+Self-contained OB-Xd-skinned web panel, auto-discovered by schwung-manager and loaded in a
+sandboxed iframe on `http://move.local:7700/remote-ui` when OB-Xd is the synth of a slot.
+Uses the `schwungRemote` postMessage API (`/static/schwung-remote-api.js`): `getParam`,
+`setParam`, `onParamChange`, `getHierarchy`, `getChainParams`. Param keys are component-
+prefixed (`synth:cutoff`). Knobs/switches/steppers are defined declaratively in the `PANELS`
+array; a fallback shim lets the page render standalone for local preview. The build script
+copies `web_ui.html` into the dist tarball.
 
 ### Voice Management
 
