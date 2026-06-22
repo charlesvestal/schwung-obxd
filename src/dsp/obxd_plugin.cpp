@@ -1045,7 +1045,22 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
          * every continuous param toward 0. The "_sv" key is not a real param, so the
          * apply loop below never touches it (it is not in g_shadow_params). */
         float sv = 0.0f;
-        bool legacy = (json_get_number(val, "_sv", &sv) != 0);
+        bool has_sv = (json_get_number(val, "_sv", &sv) == 0);
+        /* Legacy float blobs keep every param in the engine's [0,1] range; the native-int
+         * re-model stores display ints (voice_count 1..8, percents 0..100) and stamps "_sv".
+         * Some states were saved in a gap: native display ints but no "_sv". Treating those
+         * as legacy applied display values straight to the engine (e.g. voice_count 8 ->
+         * setVoiceCount(8.0) -> 249 voices -> render-loop heap overflow). So a blob is native
+         * if it has "_sv" OR carries any value clearly outside the [0,1] engine range. */
+        bool looks_native = has_sv;
+        if (!looks_native) {
+            for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
+                if (json_get_number(val, g_shadow_params[i].key, &fval) == 0 && fval > 1.5f) {
+                    looks_native = true; break;
+                }
+            }
+        }
+        bool legacy = !looks_native;
         for (int i = 0; i < (int)PARAM_DEF_COUNT(g_shadow_params); i++) {
             if (json_get_number(val, g_shadow_params[i].key, &fval) == 0) {
                 if (legacy) {

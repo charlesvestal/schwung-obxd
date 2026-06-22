@@ -98,6 +98,12 @@ public:
 	}
 	void setVoiceCount(int count)
 	{
+		/* Guard the voice array: totalvc bounds the per-sample render loop
+		 * (voices[0..totalvc-1]) and vq.reInit(count) does idx%count. A bad caller
+		 * (e.g. a legacy state restoring voice_count as a raw display int) could push
+		 * count far past MAX_VOICES -> heap overflow, or to 0 -> modulo-by-zero. */
+		if(count < 1) count = 1;
+		if(count > MAX_VOICES) count = MAX_VOICES;
 		for(int i = count ; i < MAX_VOICES;i++)
 		{
 			voices[i].NoteOff();
