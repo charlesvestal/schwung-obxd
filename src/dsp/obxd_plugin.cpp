@@ -573,6 +573,17 @@ static void v2_apply_param(obxd_instance_t *inst, int bank, int idx, float value
     }
 }
 
+/* NUL-safe substring search. The FXB chunk is binary up to the XML payload and
+ * routinely contains embedded NULs, so the scan for the payload cannot use
+ * strstr — it would stop at the first one, short of the XML entirely. */
+static char *find_bytes(char *hay, long hay_len, const char *needle) {
+    long n = (long)strlen(needle);
+    for (long i = 0; i + n <= hay_len; i++) {
+        if (memcmp(hay + i, needle, (size_t)n) == 0) return hay + i;
+    }
+    return NULL;
+}
+
 /* v2 helper: Load bank from FXB file */
 static int v2_load_bank(obxd_instance_t *inst, const char *bank_path) {
     FILE *f = fopen(bank_path, "rb");
@@ -588,15 +599,23 @@ static int v2_load_bank(obxd_instance_t *inst, const char *bank_path) {
     data[size] = '\0';
     fclose(f);
 
-    char *xml = NULL;
-    for (long i = 0; i < size - 5; i++) {
-        if (data[i] == '<' && data[i+1] == '?' && data[i+2] == 'x' &&
-            data[i+3] == 'm' && data[i+4] == 'l') {
-            xml = &data[i];
-            break;
-        }
+    /* An <?xml prolog is OPTIONAL in an .fxb: JUCE only emits one when the host
+     * asks it to, so plenty of banks shared in the wild carry the XML body and
+     * nothing else. Requiring the prolog rejected those outright — v2_load_bank
+     * returned -1, v2_switch_bank left current_bank untouched, and the bank
+     * selector snapped back to Factory with nothing logged to say why.
+     *
+     * The parse loop below only needs a pointer at or before the first
+     * <program>, so fall through the prolog to the root element and then to
+     * <program> itself. */
+    char *xml = find_bytes(data, size, "<?xml");
+    if (!xml) xml = find_bytes(data, size, "<Datsounds");
+    if (!xml) xml = find_bytes(data, size, "<program ");
+    if (!xml) {
+        plugin_log("Bank has no XML payload — not an OB-Xd .fxb?");
+        free(data);
+        return -1;
     }
-    if (!xml) { free(data); return -1; }
 
     inst->preset_count = 0;
     char *program = xml;
@@ -754,6 +773,15 @@ static int v2_switch_bank(obxd_instance_t *inst, int bank_idx) {
         char msg[128];
         snprintf(msg, sizeof(msg), "Switched to bank %d: %s (%d presets)",
                  bank_idx, inst->banks[bank_idx].name, count);
+        plugin_log(msg);
+    } else {
+        /* current_bank is deliberately left alone, so the caller keeps playing
+         * the bank it had. Say so: a silent refusal here reads downstream as
+         * "the selection reset itself", which is indistinguishable from a bug
+         * in whatever UI asked for the switch. */
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Bank %d (%s) failed to load — staying on %d",
+                 bank_idx, inst->banks[bank_idx].name, inst->current_bank);
         plugin_log(msg);
     }
     return count;
