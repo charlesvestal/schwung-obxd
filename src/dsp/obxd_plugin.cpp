@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <math.h>
 #include <dirent.h>
 
@@ -289,21 +290,34 @@ static float parse_attr_float(const char *start) {
 }
 
 /* Extract attribute value between quotes */
-static const char* find_attr(const char *xml, const char *attr_name, char *buf, int buf_len) {
+/* Find ` attr="value"` between [start, limit), returning the value in buf.
+ *
+ * Both bounds earn their keep. WHITESPACE-ANCHORED because .fxb banks exist
+ * whose params are bare numeric attributes (`0="0" 1="0" … 79="0.5"`), and an
+ * unanchored search for `0="` matches inside `10="`. BOUNDED to one element
+ * because otherwise a missing attribute is answered by the NEXT program's copy
+ * of it, silently importing a neighbour's value. */
+static const char* find_attr(const char *start, const char *limit,
+                             const char *attr_name, char *buf, int buf_len) {
     char search[64];
-    snprintf(search, sizeof(search), "%s=\"", attr_name);
-    const char *pos = strstr(xml, search);
-    if (!pos) return NULL;
+    int n = snprintf(search, sizeof(search), "%s=\"", attr_name);
+    if (n <= 0 || n >= (int)sizeof(search)) return NULL;
 
-    pos += strlen(search);
-    const char *end = strchr(pos, '"');
-    if (!end) return NULL;
+    for (const char *pos = start; pos + n <= limit; pos++) {
+        if (pos > start && !isspace((unsigned char)pos[-1])) continue;
+        if (memcmp(pos, search, (size_t)n) != 0) continue;
 
-    int len = end - pos;
-    if (len >= buf_len) len = buf_len - 1;
-    strncpy(buf, pos, len);
-    buf[len] = '\0';
-    return end + 1;
+        const char *val = pos + n;
+        const char *end = (const char*)memchr(val, '"', (size_t)(limit - val));
+        if (!end) return NULL;
+
+        int len = (int)(end - val);
+        if (len >= buf_len) len = buf_len - 1;
+        memcpy(buf, val, (size_t)len);
+        buf[len] = '\0';
+        return end + 1;
+    }
+    return NULL;
 }
 
 /* =====================================================================
@@ -625,7 +639,12 @@ static int v2_load_bank(obxd_instance_t *inst, const char *bank_path) {
         Preset *p = &inst->presets[inst->preset_count];
         memset(p, 0, sizeof(Preset));
 
-        if (find_attr(program, "programName", buf, sizeof(buf))) {
+        /* Every attribute lives in the self-closing <program …/> tag, so scope
+         * the lookups to it rather than to the rest of the file. */
+        const char *prog_end = strchr(program, '>');
+        if (!prog_end) break;
+
+        if (find_attr(program, prog_end, "programName", buf, sizeof(buf))) {
             strncpy(p->name, buf, sizeof(p->name) - 1);
         } else {
             snprintf(p->name, sizeof(p->name), "Preset %d", inst->preset_count);
@@ -633,11 +652,23 @@ static int v2_load_bank(obxd_instance_t *inst, const char *bank_path) {
 
         for (int i = 0; i < MAX_PARAMS; i++) {
             char attr_name[16];
+            /* OB-Xd has written these under two names. factory.fxb uses
+             * `Val_<n>`; banks saved by other builds use a bare `<n>`. It is
+             * the same index space either way (0..79 in both), so try one then
+             * the other.
+             *
+             * Getting this wrong is invisible rather than loud: param_count
+             * stays 0, v2_apply_preset gates every engine write on it and so
+             * applies nothing, and preset_name — which comes from programName,
+             * present in both dialects — still updates. The patch name changes
+             * and the sound does not. */
             snprintf(attr_name, sizeof(attr_name), "Val_%d", i);
-            if (find_attr(program, attr_name, buf, sizeof(buf))) {
-                p->params[i] = parse_attr_float(buf);
-                p->param_count = i + 1;
+            if (!find_attr(program, prog_end, attr_name, buf, sizeof(buf))) {
+                snprintf(attr_name, sizeof(attr_name), "%d", i);
+                if (!find_attr(program, prog_end, attr_name, buf, sizeof(buf))) continue;
             }
+            p->params[i] = parse_attr_float(buf);
+            p->param_count = i + 1;
         }
 
         inst->preset_count++;
