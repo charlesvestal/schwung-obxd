@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <math.h>
 #include <dirent.h>
 
@@ -289,21 +290,34 @@ static float parse_attr_float(const char *start) {
 }
 
 /* Extract attribute value between quotes */
-static const char* find_attr(const char *xml, const char *attr_name, char *buf, int buf_len) {
+/* Find ` attr="value"` between [start, limit), returning the value in buf.
+ *
+ * Both bounds earn their keep. WHITESPACE-ANCHORED because .fxb banks exist
+ * whose params are bare numeric attributes (`0="0" 1="0" … 79="0.5"`), and an
+ * unanchored search for `0="` matches inside `10="`. BOUNDED to one element
+ * because otherwise a missing attribute is answered by the NEXT program's copy
+ * of it, silently importing a neighbour's value. */
+static const char* find_attr(const char *start, const char *limit,
+                             const char *attr_name, char *buf, int buf_len) {
     char search[64];
-    snprintf(search, sizeof(search), "%s=\"", attr_name);
-    const char *pos = strstr(xml, search);
-    if (!pos) return NULL;
+    int n = snprintf(search, sizeof(search), "%s=\"", attr_name);
+    if (n <= 0 || n >= (int)sizeof(search)) return NULL;
 
-    pos += strlen(search);
-    const char *end = strchr(pos, '"');
-    if (!end) return NULL;
+    for (const char *pos = start; pos + n <= limit; pos++) {
+        if (pos > start && !isspace((unsigned char)pos[-1])) continue;
+        if (memcmp(pos, search, (size_t)n) != 0) continue;
 
-    int len = end - pos;
-    if (len >= buf_len) len = buf_len - 1;
-    strncpy(buf, pos, len);
-    buf[len] = '\0';
-    return end + 1;
+        const char *val = pos + n;
+        const char *end = (const char*)memchr(val, '"', (size_t)(limit - val));
+        if (!end) return NULL;
+
+        int len = (int)(end - val);
+        if (len >= buf_len) len = buf_len - 1;
+        memcpy(buf, val, (size_t)len);
+        buf[len] = '\0';
+        return end + 1;
+    }
+    return NULL;
 }
 
 /* =====================================================================
@@ -573,6 +587,17 @@ static void v2_apply_param(obxd_instance_t *inst, int bank, int idx, float value
     }
 }
 
+/* NUL-safe substring search. The FXB chunk is binary up to the XML payload and
+ * routinely contains embedded NULs, so the scan for the payload cannot use
+ * strstr — it would stop at the first one, short of the XML entirely. */
+static char *find_bytes(char *hay, long hay_len, const char *needle) {
+    long n = (long)strlen(needle);
+    for (long i = 0; i + n <= hay_len; i++) {
+        if (memcmp(hay + i, needle, (size_t)n) == 0) return hay + i;
+    }
+    return NULL;
+}
+
 /* v2 helper: Load bank from FXB file */
 static int v2_load_bank(obxd_instance_t *inst, const char *bank_path) {
     FILE *f = fopen(bank_path, "rb");
@@ -588,15 +613,23 @@ static int v2_load_bank(obxd_instance_t *inst, const char *bank_path) {
     data[size] = '\0';
     fclose(f);
 
-    char *xml = NULL;
-    for (long i = 0; i < size - 5; i++) {
-        if (data[i] == '<' && data[i+1] == '?' && data[i+2] == 'x' &&
-            data[i+3] == 'm' && data[i+4] == 'l') {
-            xml = &data[i];
-            break;
-        }
+    /* An <?xml prolog is OPTIONAL in an .fxb: JUCE only emits one when the host
+     * asks it to, so plenty of banks shared in the wild carry the XML body and
+     * nothing else. Requiring the prolog rejected those outright — v2_load_bank
+     * returned -1, v2_switch_bank left current_bank untouched, and the bank
+     * selector snapped back to Factory with nothing logged to say why.
+     *
+     * The parse loop below only needs a pointer at or before the first
+     * <program>, so fall through the prolog to the root element and then to
+     * <program> itself. */
+    char *xml = find_bytes(data, size, "<?xml");
+    if (!xml) xml = find_bytes(data, size, "<Datsounds");
+    if (!xml) xml = find_bytes(data, size, "<program ");
+    if (!xml) {
+        plugin_log("Bank has no XML payload — not an OB-Xd .fxb?");
+        free(data);
+        return -1;
     }
-    if (!xml) { free(data); return -1; }
 
     inst->preset_count = 0;
     char *program = xml;
@@ -606,7 +639,12 @@ static int v2_load_bank(obxd_instance_t *inst, const char *bank_path) {
         Preset *p = &inst->presets[inst->preset_count];
         memset(p, 0, sizeof(Preset));
 
-        if (find_attr(program, "programName", buf, sizeof(buf))) {
+        /* Every attribute lives in the self-closing <program …/> tag, so scope
+         * the lookups to it rather than to the rest of the file. */
+        const char *prog_end = strchr(program, '>');
+        if (!prog_end) break;
+
+        if (find_attr(program, prog_end, "programName", buf, sizeof(buf))) {
             strncpy(p->name, buf, sizeof(p->name) - 1);
         } else {
             snprintf(p->name, sizeof(p->name), "Preset %d", inst->preset_count);
@@ -614,11 +652,23 @@ static int v2_load_bank(obxd_instance_t *inst, const char *bank_path) {
 
         for (int i = 0; i < MAX_PARAMS; i++) {
             char attr_name[16];
+            /* OB-Xd has written these under two names. factory.fxb uses
+             * `Val_<n>`; banks saved by other builds use a bare `<n>`. It is
+             * the same index space either way (0..79 in both), so try one then
+             * the other.
+             *
+             * Getting this wrong is invisible rather than loud: param_count
+             * stays 0, v2_apply_preset gates every engine write on it and so
+             * applies nothing, and preset_name — which comes from programName,
+             * present in both dialects — still updates. The patch name changes
+             * and the sound does not. */
             snprintf(attr_name, sizeof(attr_name), "Val_%d", i);
-            if (find_attr(program, attr_name, buf, sizeof(buf))) {
-                p->params[i] = parse_attr_float(buf);
-                p->param_count = i + 1;
+            if (!find_attr(program, prog_end, attr_name, buf, sizeof(buf))) {
+                snprintf(attr_name, sizeof(attr_name), "%d", i);
+                if (!find_attr(program, prog_end, attr_name, buf, sizeof(buf))) continue;
             }
+            p->params[i] = parse_attr_float(buf);
+            p->param_count = i + 1;
         }
 
         inst->preset_count++;
@@ -754,6 +804,15 @@ static int v2_switch_bank(obxd_instance_t *inst, int bank_idx) {
         char msg[128];
         snprintf(msg, sizeof(msg), "Switched to bank %d: %s (%d presets)",
                  bank_idx, inst->banks[bank_idx].name, count);
+        plugin_log(msg);
+    } else {
+        /* current_bank is deliberately left alone, so the caller keeps playing
+         * the bank it had. Say so: a silent refusal here reads downstream as
+         * "the selection reset itself", which is indistinguishable from a bug
+         * in whatever UI asked for the switch. */
+        char msg[128];
+        snprintf(msg, sizeof(msg), "Bank %d (%s) failed to load — staying on %d",
+                 bank_idx, inst->banks[bank_idx].name, inst->current_bank);
         plugin_log(msg);
     }
     return count;
