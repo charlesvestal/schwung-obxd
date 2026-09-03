@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <math.h>
 #include <dirent.h>
 
@@ -326,6 +327,7 @@ typedef struct {
     BankInfo banks[MAX_BANKS];
     int bank_count;
     int current_bank;
+    time_t banks_scanned_at;  /* throttles the presets/ rescan off the realtime path */
 } obxd_instance_t;
 
 /* Forward declarations */
@@ -1152,9 +1154,27 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     if (strcmp(key, "patch_in_bank") == 0) {
         return snprintf(buf, buf_len, "%d", inst->current_preset + 1);
     }
-    /* fxb_bank_list — JSON array for hierarchy items_param; rescan on each query */
+    /*
+     * fxb_bank_list — JSON array for the hierarchy's items_param.
+     *
+     * ⚠⚠ THIS USED TO RESCAN THE DIRECTORY ON EVERY READ, and the host reads it
+     * on a poll while the Banks page is up: measured on the device, 399 full
+     * scans in 26 seconds — one every ~18 ms, each a readdir plus an fopen per
+     * bank. get_param is served on the SPI callback, so that is file I/O on the
+     * realtime path, which the host contract forbids outright
+     * (docs/REALTIME_SAFETY.md rule 4; a get_param that scans a directory is
+     * called out there by name as worse than the equivalent set_param).
+     *
+     * The list is cached and refreshed at most once a second, so a bank dropped
+     * into presets/ still appears without a reload — which is the only reason
+     * the rescan was here — while the poll costs nothing.
+     */
     if (strcmp(key, "fxb_bank_list") == 0) {
-        v2_scan_banks(inst, inst->module_dir);
+        time_t now_s = time(NULL);
+        if (inst->bank_count == 0 || now_s != inst->banks_scanned_at) {
+            v2_scan_banks(inst, inst->module_dir);
+            inst->banks_scanned_at = now_s;
+        }
         int pos = 0;
         pos += snprintf(buf + pos, buf_len - pos, "[");
         for (int i = 0; i < inst->bank_count && pos < buf_len - 2; i++) {
