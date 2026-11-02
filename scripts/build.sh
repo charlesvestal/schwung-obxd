@@ -73,6 +73,14 @@ cat src/ui.js > dist/obxd/ui.js
 cat build/dsp.so > dist/obxd/dsp.so
 chmod +x dist/obxd/dsp.so
 
+# Licence texts. The module is distributed under GPL-3.0 (LICENSE), as the
+# OB-Xd project is; the vendored OB-Xd engine headers (src/dsp/Engine/) name
+# "GNU General Public License Version 2", so that text ships too.
+# Unconditional: a missing file fails the build.
+mkdir -p dist/obxd/licenses
+cat LICENSE > dist/obxd/LICENSE
+cat licenses/OBXD_ENGINE_GPL-2.0.txt > dist/obxd/licenses/OBXD_ENGINE_GPL-2.0.txt
+
 # Copy presets
 if [ -d "src/presets" ]; then
     mkdir -p dist/obxd/presets
